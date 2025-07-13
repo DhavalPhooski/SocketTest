@@ -1,62 +1,55 @@
 // Initialize Supabase
-const supabaseUrl = 'https://nqssnsqcqjxqjnytzxus.supabase.co';
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5xc3Nuc3FjcWp4cWpueXR6eHVzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTI0MzYwNjYsImV4cCI6MjA2ODAxMjA2Nn0.n0ut8CyAWl4kSdRA3o8ANk9itGqAdoB12rjL2GX5RRs';
-const supabase = supabase.createClient(supabaseUrl, supabaseKey);
+const supabase = supabase.createClient(
+  'https://your-project.supabase.co',
+  'your-anon-key'
+);
 
-let currentUser = null;
-let myRow = null;
+let currentRow = null;
 
 document.addEventListener('DOMContentLoaded', async () => {
-  // Check for existing user session
-  const { data: { session } } = await supabase.auth.getSession();
-  currentUser = session?.user.id || crypto.randomUUID();
+  // Assign user to a row
+  currentRow = await assignUserRow();
+  document.getElementById('status').textContent = `You control: ${currentRow}`;
   
-  // Assign row based on first-come-first-serve
-  myRow = await assignUserRow();
-  
-  // Setup realtime subscription
-  const channel = supabase.channel('box_updates')
-    .on(
-      'postgres_changes',
-      { event: 'UPDATE', schema: 'public', table: 'box_states' },
-      handleStateUpdate
-    )
+  // Listen for changes
+  supabase.channel('box-changes')
+    .on('postgres_changes', {
+      event: 'UPDATE',
+      schema: 'public',
+      table: 'box_states'
+    }, (payload) => {
+      updateBoxes(payload.new);
+    })
     .subscribe();
 
   // Initial load
   const { data } = await supabase.from('box_states').select('*').single();
   updateBoxes(data);
-  
-  // Set up box click handlers
+
+  // Set up click handlers
   document.querySelectorAll('.box').forEach(box => {
     box.addEventListener('click', () => handleBoxClick(box));
   });
 });
 
-// Helper functions
 async function assignUserRow() {
   const { data } = await supabase.rpc('get_available_row');
-  document.getElementById('status').textContent = `You control: ${data.toUpperCase()}`;
-  return data;
+  return data; // Returns 'row1' or 'row2'
 }
 
 async function handleBoxClick(box) {
   const row = box.parentElement.id;
-  const index = box.dataset.index;
+  const index = parseInt(box.dataset.index);
   
-  if (row !== myRow) {
-    alert(`Only ${myRow} user can control these boxes`);
+  if (row !== currentRow) {
+    alert(`You can only control ${currentRow} boxes!`);
     return;
   }
 
-  const { data } = await supabase.rpc('update_box_state', {
+  await supabase.rpc('update_box_state', {
     row_name: row,
-    box_index: parseInt(index)
+    box_index: index
   });
-}
-
-function handleStateUpdate(payload) {
-  updateBoxes(payload.new);
 }
 
 function updateBoxes(state) {
@@ -64,7 +57,7 @@ function updateBoxes(state) {
     const boxes = document.querySelectorAll(`#${row} .box`);
     boxes.forEach((box, i) => {
       box.classList.toggle('active', state[row][i]);
-      box.style.cursor = (row === myRow) ? 'pointer' : 'not-allowed';
+      box.style.cursor = (row === currentRow) ? 'pointer' : 'not-allowed';
     });
   });
 }
