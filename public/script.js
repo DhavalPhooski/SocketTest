@@ -1,81 +1,70 @@
-document.addEventListener('DOMContentLoaded', () => {
-    const statusEl = document.getElementById('status');
-    let eventSource;
-    let currentUser = null;
-    let clientId = null;
+// Initialize Supabase
+const supabaseUrl = 'https://nqssnsqcqjxqjnytzxus.supabase.co';
+const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5xc3Nuc3FjcWp4cWpueXR6eHVzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTI0MzYwNjYsImV4cCI6MjA2ODAxMjA2Nn0.n0ut8CyAWl4kSdRA3o8ANk9itGqAdoB12rjL2GX5RRs';
+const supabase = supabase.createClient(supabaseUrl, supabaseKey);
 
-    function connectSSE() {
-        statusEl.textContent = "Connecting...";
-        statusEl.style.color = "blue";
-        
-        eventSource = new EventSource('/api/sse');
+let currentUser = null;
+let myRow = null;
 
-        eventSource.addEventListener('assign-user', (event) => {
-            const data = JSON.parse(event.data);
-            clientId = data.clientId;
-            currentUser = data.user;
-            
-            console.log(`Assigned as: ${currentUser} (ID: ${clientId})`);
-            statusEl.textContent = currentUser 
-                ? `Connected as ${currentUser.toUpperCase()} ✅` 
-                : "Connected as Spectator 👀";
-            statusEl.style.color = currentUser ? 'green' : 'gray';
-            
-            updateBoxes(data.states);
-        });
+document.addEventListener('DOMContentLoaded', async () => {
+  // Check for existing user session
+  const { data: { session } } = await supabase.auth.getSession();
+  currentUser = session?.user.id || crypto.randomUUID();
+  
+  // Assign row based on first-come-first-serve
+  myRow = await assignUserRow();
+  
+  // Setup realtime subscription
+  const channel = supabase.channel('box_updates')
+    .on(
+      'postgres_changes',
+      { event: 'UPDATE', schema: 'public', table: 'box_states' },
+      handleStateUpdate
+    )
+    .subscribe();
 
-        eventSource.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            updateBoxes(data.states);
-        };
-
-        eventSource.onerror = (error) => {
-            console.error("SSE Error:", error);
-            statusEl.textContent = 'Disconnected ❌ (Reconnecting...)';
-            statusEl.style.color = 'red';
-            setTimeout(connectSSE, 3000);
-        };
-    }
-
-    function updateBoxes(states) {
-        ['row1', 'row2'].forEach(row => {
-            const boxes = document.querySelectorAll(`#${row} .box`);
-            boxes.forEach((box, index) => {
-                box.classList.toggle('active', states[row][index]);
-                box.style.cursor = currentUser === row ? 'pointer' : 'not-allowed';
-            });
-        });
-    }
-
-    document.querySelectorAll('.box').forEach(box => {
-        box.addEventListener('click', async function() {
-            if (!currentUser || currentUser === 'spectator') {
-                alert('Please wait for user assignment or refresh the page');
-                return;
-            }
-            
-            const row = this.parentElement.id;
-            const index = parseInt(this.dataset.index);
-            
-            if (currentUser !== row) {
-                alert(`Only ${row.toUpperCase()} user can control these boxes`);
-                return;
-            }
-
-            try {
-                const response = await fetch('/api/update', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ row, index })
-                });
-                
-                if (!response.ok) throw new Error('Update failed');
-            } catch (error) {
-                console.error('Update error:', error);
-                alert('Update failed. Please check console for details.');
-            }
-        });
-    });
-
-    connectSSE();
+  // Initial load
+  const { data } = await supabase.from('box_states').select('*').single();
+  updateBoxes(data);
+  
+  // Set up box click handlers
+  document.querySelectorAll('.box').forEach(box => {
+    box.addEventListener('click', () => handleBoxClick(box));
+  });
 });
+
+// Helper functions
+async function assignUserRow() {
+  const { data } = await supabase.rpc('get_available_row');
+  document.getElementById('status').textContent = `You control: ${data.toUpperCase()}`;
+  return data;
+}
+
+async function handleBoxClick(box) {
+  const row = box.parentElement.id;
+  const index = box.dataset.index;
+  
+  if (row !== myRow) {
+    alert(`Only ${myRow} user can control these boxes`);
+    return;
+  }
+
+  const { data } = await supabase.rpc('update_box_state', {
+    row_name: row,
+    box_index: parseInt(index)
+  });
+}
+
+function handleStateUpdate(payload) {
+  updateBoxes(payload.new);
+}
+
+function updateBoxes(state) {
+  ['row1', 'row2'].forEach(row => {
+    const boxes = document.querySelectorAll(`#${row} .box`);
+    boxes.forEach((box, i) => {
+      box.classList.toggle('active', state[row][i]);
+      box.style.cursor = (row === myRow) ? 'pointer' : 'not-allowed';
+    });
+  });
+}
