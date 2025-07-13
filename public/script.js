@@ -1,43 +1,41 @@
-// Initialize Supabase
-const supabase = supabase.createClient(
-  'https://your-project.supabase.co',
-  'your-anon-key'
-);
-
-let currentRow = null;
-
 document.addEventListener('DOMContentLoaded', async () => {
-  // Assign user to a row
-  currentRow = await assignUserRow();
+  // 1. Initialize Supabase
+  const supabase = supabase.createClient(
+    'https://your-project.supabase.co',
+    'your-anon-key'
+  );
+
+  // 2. Assign user to row
+  const currentRow = await assignUserRow(supabase);
   document.getElementById('status').textContent = `You control: ${currentRow}`;
   
-  // Listen for changes
-  supabase.channel('box-changes')
+  // 3. Set up realtime listener
+  supabase.channel('box-updates')
     .on('postgres_changes', {
       event: 'UPDATE',
       schema: 'public',
       table: 'box_states'
-    }, (payload) => {
-      updateBoxes(payload.new);
-    })
+    }, (payload) => updateBoxes(payload.new))
     .subscribe();
 
-  // Initial load
+  // 4. Initial load
   const { data } = await supabase.from('box_states').select('*').single();
   updateBoxes(data);
 
-  // Set up click handlers
+  // 5. Set up click handlers
   document.querySelectorAll('.box').forEach(box => {
-    box.addEventListener('click', () => handleBoxClick(box));
+    box.addEventListener('click', () => handleBoxClick(supabase, box, currentRow));
   });
 });
 
-async function assignUserRow() {
-  const { data } = await supabase.rpc('get_available_row');
-  return data; // Returns 'row1' or 'row2'
+// Helper functions
+async function assignUserRow(supabase) {
+  const { data, error } = await supabase.rpc('get_available_row');
+  if (error) console.error("Row assignment failed:", error);
+  return data || 'row1'; // Default fallback
 }
 
-async function handleBoxClick(box) {
+async function handleBoxClick(supabase, box, currentRow) {
   const row = box.parentElement.id;
   const index = parseInt(box.dataset.index);
   
@@ -46,18 +44,21 @@ async function handleBoxClick(box) {
     return;
   }
 
-  await supabase.rpc('update_box_state', {
+  const { error } = await supabase.rpc('update_box_state', {
     row_name: row,
     box_index: index
   });
+  
+  if (error) console.error("Update failed:", error);
 }
 
 function updateBoxes(state) {
   ['row1', 'row2'].forEach(row => {
     const boxes = document.querySelectorAll(`#${row} .box`);
     boxes.forEach((box, i) => {
-      box.classList.toggle('active', state[row][i]);
-      box.style.cursor = (row === currentRow) ? 'pointer' : 'not-allowed';
+      const isActive = state[row][i];
+      box.classList.toggle('active', isActive);
+      box.style.cursor = box.parentElement.id === currentRow ? 'pointer' : 'not-allowed';
     });
   });
 }
