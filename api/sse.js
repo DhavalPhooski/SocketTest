@@ -3,7 +3,10 @@ let boxStates = {
     row1: [false, false, true, false, false],
     row2: [false, false, true, false, false]
 };
-let userCount = 0;
+let userAssignments = {
+    row1: null,
+    row2: null
+};
 
 export default function handler(req, res) {
     // Set SSE headers
@@ -13,8 +16,14 @@ export default function handler(req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
 
     // Assign user role
-    const user = userCount < 2 ? `row${userCount + 1}` : 'spectator';
-    if (userCount < 2) userCount++;
+    let user = 'spectator';
+    if (!userAssignments.row1) {
+        user = 'row1';
+        userAssignments.row1 = true;
+    } else if (!userAssignments.row2) {
+        user = 'row2';
+        userAssignments.row2 = true;
+    }
 
     // Send initial state
     res.write(`data: ${JSON.stringify({
@@ -24,16 +33,16 @@ export default function handler(req, res) {
 
     // Store client
     const clientId = Date.now();
-    clients.push({ id: clientId, res });
+    clients.push({ id: clientId, res, user });
 
     // Clean up on disconnect
     req.on('close', () => {
         clients = clients.filter(c => c.id !== clientId);
-        if (user !== 'spectator') userCount--;
+        if (user === 'row1') userAssignments.row1 = null;
+        if (user === 'row2') userAssignments.row2 = null;
     });
 }
 
-// Broadcast updates to all clients
 export function broadcastUpdate() {
     clients.forEach(client => {
         client.res.write(`data: ${JSON.stringify({
