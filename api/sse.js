@@ -3,9 +3,11 @@ let boxStates = {
     row1: [false, false, true, false, false],
     row2: [false, false, true, false, false]
 };
-let userAssignments = {
-    row1: null,
-    row2: null
+
+// Track available user slots
+const availableUsers = {
+    row1: true,
+    row2: true
 };
 
 export default function handler(req, res) {
@@ -17,29 +19,33 @@ export default function handler(req, res) {
 
     // Assign user role
     let user = 'spectator';
-    if (!userAssignments.row1) {
+    if (availableUsers.row1) {
         user = 'row1';
-        userAssignments.row1 = true;
-    } else if (!userAssignments.row2) {
+        availableUsers.row1 = false;
+    } else if (availableUsers.row2) {
         user = 'row2';
-        userAssignments.row2 = true;
+        availableUsers.row2 = false;
     }
+
+    // Create client ID
+    const clientId = Date.now();
 
     // Send initial state
     res.write(`data: ${JSON.stringify({
         states: boxStates,
-        user: user !== 'spectator' ? user : null
+        user: user !== 'spectator' ? user : null,
+        clientId
     })}\n\n`);
 
     // Store client
-    const clientId = Date.now();
     clients.push({ id: clientId, res, user });
 
     // Clean up on disconnect
     req.on('close', () => {
         clients = clients.filter(c => c.id !== clientId);
-        if (user === 'row1') userAssignments.row1 = null;
-        if (user === 'row2') userAssignments.row2 = null;
+        if (user === 'row1') availableUsers.row1 = true;
+        if (user === 'row2') availableUsers.row2 = true;
+        console.log(`Client ${clientId} (${user}) disconnected`);
     });
 }
 

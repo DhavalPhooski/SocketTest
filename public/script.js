@@ -2,85 +2,77 @@ document.addEventListener('DOMContentLoaded', () => {
     const statusEl = document.getElementById('status');
     let eventSource;
     let currentUser = null;
+    let clientId = null;
 
-    // Initialize SSE connection
     function connectSSE() {
         statusEl.textContent = "Connecting...";
         statusEl.style.color = "blue";
         
         eventSource = new EventSource('/api/sse');
 
-        eventSource.onmessage = (event) => {
+        eventSource.addEventListener('assign-user', (event) => {
             const data = JSON.parse(event.data);
-            console.log("Received update:", data); // Debug log
+            clientId = data.clientId;
+            currentUser = data.user;
+            
+            console.log(`Assigned as: ${currentUser} (ID: ${clientId})`);
+            statusEl.textContent = currentUser 
+                ? `Connected as ${currentUser.toUpperCase()} ✅` 
+                : "Connected as Spectator 👀";
+            statusEl.style.color = currentUser ? 'green' : 'gray';
             
             updateBoxes(data.states);
-            if (data.user) {
-                currentUser = data.user;
-                console.log("Assigned user:", currentUser); // Debug log
-            }
-            statusEl.textContent = `Connected as ${currentUser || 'Spectator'} ✅`;
-            statusEl.style.color = 'green';
+        });
+
+        eventSource.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            updateBoxes(data.states);
         };
 
         eventSource.onerror = (error) => {
-            console.error("SSE Error:", error); // Debug log
+            console.error("SSE Error:", error);
             statusEl.textContent = 'Disconnected ❌ (Reconnecting...)';
             statusEl.style.color = 'red';
             setTimeout(connectSSE, 3000);
         };
     }
 
-    // Update box states with user permissions
     function updateBoxes(states) {
         ['row1', 'row2'].forEach(row => {
             const boxes = document.querySelectorAll(`#${row} .box`);
             boxes.forEach((box, index) => {
-                const isActive = states[row][index];
-                box.classList.toggle('active', isActive);
-                
-                // Only allow clicks if this is the user's row
+                box.classList.toggle('active', states[row][index]);
                 box.style.cursor = currentUser === row ? 'pointer' : 'not-allowed';
-                box.title = currentUser === row 
-                    ? 'Click to select' 
-                    : `Only ${row} user can control these boxes`;
             });
         });
     }
 
-    // Handle box clicks with user verification
     document.querySelectorAll('.box').forEach(box => {
         box.addEventListener('click', async function() {
-            if (!currentUser) {
-                console.warn("No user assigned yet");
+            if (!currentUser || currentUser === 'spectator') {
+                alert('Please wait for user assignment or refresh the page');
                 return;
             }
             
             const row = this.parentElement.id;
             const index = parseInt(this.dataset.index);
             
-            console.log(`Click detected on ${row} box ${index} by ${currentUser}`); // Debug log
-            
             if (currentUser !== row) {
-                console.warn(`User ${currentUser} cannot control ${row}`);
+                alert(`Only ${row.toUpperCase()} user can control these boxes`);
                 return;
             }
 
             try {
-                console.log("Sending update request..."); // Debug log
                 const response = await fetch('/api/update', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ row, index })
                 });
                 
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                console.log("Update successful"); // Debug log
+                if (!response.ok) throw new Error('Update failed');
             } catch (error) {
-                console.error('Update failed:', error);
-                alert('Failed to update box. Please check console for details.');
+                console.error('Update error:', error);
+                alert('Update failed. Please check console for details.');
             }
         });
     });
